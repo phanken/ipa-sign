@@ -1,0 +1,1 @@
+Đặt sideloader.exe và các DLL Windows của Dadoum/Sideloader vào thư mục này.
