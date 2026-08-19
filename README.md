@@ -43,3 +43,11 @@ Nếu backend phát hành kèm các DLL, phải đặt chúng cùng thư mục v
 6. Sau khi cài, iOS 16+ cần bật Developer Mode nếu chưa bật.
 
 Với Apple ID miễn phí, ứng dụng ký bằng Personal Team có thời hạn ngắn và cần ký lại định kỳ.
+
+
+## Thay đổi v2
+- Sửa khung LOG bị co nhỏ.
+- Thêm 3 ô riêng: Apple ID, mật khẩu, mã 2FA.
+- Mật khẩu hiển thị dạng ẩn.
+- Mật khẩu và 2FA tự xóa khỏi ô sau khi gửi.
+- Chỉ gửi dữ liệu khi backend đang chạy và người dùng bấm nút.
