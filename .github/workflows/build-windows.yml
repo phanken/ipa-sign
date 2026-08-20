@@ -1,4 +1,4 @@
-name: Build IPA Signer Pro Windows v5
+name: Build IPA Signer Pro Windows v5.1 Full
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -46,7 +46,7 @@ jobs:
         shell: pwsh
         run: New-Item -ItemType Directory -Force publish\tools | Out-Null
 
-      - name: Download exact Sideloader-compatible Windows runtime
+      - name: Download exact libimobiledevice runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -62,9 +62,32 @@ jobs:
             ForEach-Object { Copy-Item $_.FullName publish\tools\ -Force }
 
           if (-not (Test-Path "publish\tools\plist.dll")) {
-            Write-Host "Files copied:"
-            Get-ChildItem publish\tools | Select-Object Name,Length | Format-Table
-            throw "plist.dll not found after extracting exact runtime package."
+            throw "plist.dll missing after extracting runtime."
+          }
+
+      - name: Install OpenSSL x64 on runner
+        shell: pwsh
+        run: |
+          choco install openssl.light -y --no-progress
+
+      - name: Bundle OpenSSL DLLs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $roots = @(
+            "C:\Program Files\OpenSSL-Win64\bin",
+            "C:\Program Files\OpenSSL\bin"
+          )
+          $found = @()
+          foreach ($r in $roots) {
+            if (Test-Path $r) {
+              $found += Get-ChildItem $r -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^(libcrypto|libssl).*[.]dll$' }
+            }
+          }
+          if (-not $found) { throw "OpenSSL DLLs not found." }
+          foreach ($f in $found) {
+            Copy-Item $f.FullName publish\tools\ -Force
           }
 
       - name: Copy Sideloader executable
@@ -78,7 +101,7 @@ jobs:
             throw "Put Sideloader Windows executable at tools\sideloader.exe before running Actions."
           }
 
-      - name: Final runtime verification
+      - name: Verify required runtime files
         shell: pwsh
         run: |
           $required = @(
@@ -88,8 +111,28 @@ jobs:
           foreach ($f in $required) {
             if (-not (Test-Path $f)) { throw "Missing required file: $f" }
           }
+          $crypto = Get-ChildItem publish\tools -Filter "libcrypto*.dll"
+          $ssl = Get-ChildItem publish\tools -Filter "libssl*.dll"
+          if (-not $crypto) { throw "Missing libcrypto DLL." }
+          if (-not $ssl) { throw "Missing libssl DLL." }
 
-          Write-Host "=== FINAL tools folder ==="
+      - name: Smoke test Sideloader backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location publish\tools
+          try {
+            .\sideloader.exe version
+            if ($LASTEXITCODE -ne 0) {
+              throw "sideloader version failed with exit code $LASTEXITCODE"
+            }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Show final package runtime
+        shell: pwsh
+        run: |
           Get-ChildItem publish\tools -File |
             Sort-Object Name |
             Select-Object Name,Length |
@@ -99,12 +142,12 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item README.md publish\README.txt -Force
-          Copy-Item README-v5.txt publish\README-v5.txt -Force
+          Copy-Item README-v5.1.txt publish\README-v5.1.txt -Force
 
-      - name: Upload ready-to-run package
+      - name: Upload tested package
         uses: actions/upload-artifact@v4
         with:
-          name: IPA-Signer-Pro-Windows-v5-Full
+          name: IPA-Signer-Pro-Windows-v5.1-TESTED
           path: publish/
           if-no-files-found: error
           retention-days: 30

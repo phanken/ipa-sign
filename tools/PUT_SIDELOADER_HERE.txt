@@ -1,1 +1,1 @@
-Đặt Sideloader Windows ở đây và đổi tên thành sideloader.exe trước khi push GitHub.
+Đặt Sideloader Windows executable tại tools/sideloader.exe trước khi push GitHub.

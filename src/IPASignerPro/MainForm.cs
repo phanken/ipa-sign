@@ -164,7 +164,7 @@ public sealed class MainForm : Form
         password.KeyDown += (_,e) => SendOnEnter(e, password, "mật khẩu", true);
         twoFa.KeyDown += (_,e) => SendOnEnter(e, twoFa, "mã 2FA", true);
 
-        Log("IPA Signer Pro v2 khởi động.");
+        Log("IPA Signer Pro v5.1 khởi động.");
         Log("1) Chọn IPA và cắm iPhone.");
         Log("2) Bấm KÝ & CÀI VÀO IPHONE.");
         Log("3) Đọc LOG. Khi backend yêu cầu gì thì bấm nút gửi tương ứng.");
@@ -194,18 +194,76 @@ public sealed class MainForm : Form
 
     private async Task CheckBackend()
     {
+        console.Clear();
+        Log("=== KIỂM TRA BACKEND ===");
+
         var exe = BackendPath();
+        Log("Sideloader: " + exe);
+
         if (!File.Exists(exe))
         {
             status.Text = "Thiếu sideloader.exe";
-            Log("Không tìm thấy backend: " + exe);
-            Log("Đặt sideloader.exe và DLL đi kèm vào thư mục tools.");
+            Log("[FAIL] Không tìm thấy sideloader.exe.");
             return;
         }
 
-        status.Text = "Đang kiểm tra...";
-        var code = await RunOneShot(exe, "version");
-        status.Text = code == 0 ? "Backend OK" : "Backend có lỗi";
+        var toolDir = Path.GetDirectoryName(exe)!;
+        var mustExist = new[]
+        {
+            "plist.dll"
+        };
+
+        var missing = new List<string>();
+        foreach (var name in mustExist)
+        {
+            var path = Path.Combine(toolDir, name);
+            if (File.Exists(path))
+                Log("[OK] " + name);
+            else
+            {
+                Log("[MISSING] " + name);
+                missing.Add(name);
+            }
+        }
+
+        var openssl = Directory.GetFiles(toolDir, "libcrypto*.dll")
+            .Concat(Directory.GetFiles(toolDir, "libssl*.dll"))
+            .ToArray();
+        if (openssl.Length == 0)
+        {
+            Log("[WARN] Không thấy libcrypto/libssl DLL. Sideloader hiện cần OpenSSL runtime trên Windows.");
+        }
+        else
+        {
+            foreach (var dll in openssl) Log("[OK] " + Path.GetFileName(dll));
+        }
+
+        if (missing.Count > 0)
+        {
+            status.Text = "Thiếu runtime";
+            Log("[FAIL] Backend chưa đủ DLL.");
+            return;
+        }
+
+        status.Text = "Đang chạy thử...";
+        Log("Chạy: sideloader version");
+
+        var result = await RunOneShotDetailed(exe, "version");
+        if (result.ExitCode == 0)
+        {
+            status.Text = "Backend OK";
+            Log("[OK] Backend chạy được.");
+        }
+        else
+        {
+            status.Text = "Backend có lỗi";
+            Log($"[FAIL] Exit code: {result.ExitCode}");
+            if (string.IsNullOrWhiteSpace(result.StdOut) && string.IsNullOrWhiteSpace(result.StdErr))
+            {
+                Log("Không có output. Thường là thiếu DLL phụ thuộc hoặc Microsoft Visual C++ Runtime.");
+                Log("Hãy dùng artifact v5.1 Full; nếu vẫn lỗi, cài Microsoft Visual C++ Redistributable x64.");
+            }
+        }
     }
 
     private async Task Install()
@@ -306,6 +364,48 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             Log("[ERR] Không gửi được " + label + ": " + ex.Message);
+        }
+    }
+
+    private sealed record ProcessResult(int ExitCode, string StdOut, string StdErr);
+
+    private async Task<ProcessResult> RunOneShotDetailed(string exe, string args)
+    {
+        var psi = new ProcessStartInfo {
+            FileName = exe,
+            Arguments = args,
+            WorkingDirectory = Path.GetDirectoryName(exe)!,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        try
+        {
+            using var p = Process.Start(psi)!;
+            var outTask = p.StandardOutput.ReadToEndAsync();
+            var errTask = p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync();
+            var stdout = await outTask;
+            var stderr = await errTask;
+
+            if (!string.IsNullOrWhiteSpace(stdout))
+                foreach (var line in stdout.Replace("\r","").Split('\n'))
+                    if (!string.IsNullOrWhiteSpace(line)) Log(line);
+
+            if (!string.IsNullOrWhiteSpace(stderr))
+                foreach (var line in stderr.Replace("\r","").Split('\n'))
+                    if (!string.IsNullOrWhiteSpace(line)) Log("[ERR] " + line);
+
+            return new ProcessResult(p.ExitCode, stdout, stderr);
+        }
+        catch (Exception ex)
+        {
+            Log("[EXCEPTION] " + ex.Message);
+            return new ProcessResult(-1, "", ex.ToString());
         }
     }
 
