@@ -1,1 +1,16 @@
-Đặt sideloader.exe và các DLL Windows của Dadoum/Sideloader vào thư mục này.
+ĐẶT SIDELOADER WINDOWS VÀO ĐÂY
+
+1. Tải Windows CLI artifact từ:
+   https://github.com/Dadoum/Sideloader/actions
+
+2. Copy executable vào thư mục tools này.
+
+Tên nên dùng:
+   sideloader.exe
+
+Nếu file tải về có tên:
+   sideloader-cli-windows-x86_64.exe
+thì có thể giữ nguyên; workflow v4 cũng nhận tên này.
+
+Không cần tự tìm plist.dll nữa:
+GitHub Actions v4 sẽ tự tải bộ runtime libimobiledevice/libplist Windows và đóng kèm vào artifact cuối.
