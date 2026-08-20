@@ -1,4 +1,4 @@
-name: Build IPA Signer Pro Windows v4 Full
+name: Build IPA Signer Pro Windows v5
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup .NET 8
@@ -19,21 +19,20 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Verify complete source
+      - name: Verify source
         shell: pwsh
         run: |
-          $required = @(
+          $files = @(
             "src\IPASignerPro\IPASignerPro.csproj",
-            "src\IPASignerPro\Program.cs",
             "src\IPASignerPro\MainForm.cs",
+            "src\IPASignerPro\Program.cs",
             "src\IPASignerPro\app.manifest"
           )
-          foreach ($f in $required) {
-            if (-not (Test-Path $f)) { throw "Missing source file: $f" }
+          foreach ($f in $files) {
+            if (-not (Test-Path $f)) { throw "Missing source: $f" }
           }
-          Write-Host "Source OK"
 
-      - name: Publish IPA Signer Pro
+      - name: Publish GUI
         run: >
           dotnet publish src/IPASignerPro/IPASignerPro.csproj
           -c Release
@@ -47,109 +46,65 @@ jobs:
         shell: pwsh
         run: New-Item -ItemType Directory -Force publish\tools | Out-Null
 
-      - name: Download latest libimobiledevice Windows x64 runtime
+      - name: Download exact Sideloader-compatible Windows runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $headers = @{
-            "User-Agent" = "IPA-Signer-Pro"
-            "Accept" = "application/vnd.github+json"
-          }
+          $url = "https://github.com/libimobiledevice-win32/imobiledevice-net/releases/download/v1.3.17/libimobiledevice.1.2.1-r1122-win-x64.zip"
+          $zip = "$env:RUNNER_TEMP\limd.zip"
+          $dir = "$env:RUNNER_TEMP\limd"
 
-          $release = Invoke-RestMethod -Headers $headers `
-            "https://api.github.com/repos/jrjr/libimobiledevice-windows/releases/latest"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive $zip $dir -Force
 
-          Write-Host "Latest runtime release: $($release.tag_name)"
-          $release.assets | Select-Object name, browser_download_url | Format-Table
+          Get-ChildItem $dir -Recurse -File |
+            Where-Object { $_.Extension -eq ".dll" } |
+            ForEach-Object { Copy-Item $_.FullName publish\tools\ -Force }
 
-          # Prefer an x64/amd64 ZIP. If names change, fall back to the largest ZIP.
-          $asset = $release.assets |
-            Where-Object { $_.name -match '(?i)(x64|amd64|win64).*[.]zip$' } |
-            Select-Object -First 1
-
-          if (-not $asset) {
-            $asset = $release.assets |
-              Where-Object { $_.name -match '(?i)[.]zip$' } |
-              Sort-Object size -Descending |
-              Select-Object -First 1
-          }
-
-          if (-not $asset) {
-            throw "No Windows ZIP asset found in jrjr/libimobiledevice-windows latest release."
-          }
-
-          Write-Host "Downloading runtime: $($asset.name)"
-          Invoke-WebRequest -Headers $headers $asset.browser_download_url `
-            -OutFile "$env:RUNNER_TEMP\libimobiledevice.zip"
-
-          Expand-Archive "$env:RUNNER_TEMP\libimobiledevice.zip" `
-            "$env:RUNNER_TEMP\libimobiledevice" -Force
-
-          # Copy the complete native runtime set, not only plist.dll.
-          Get-ChildItem "$env:RUNNER_TEMP\libimobiledevice" -Recurse -File |
-            Where-Object { $_.Extension -in ".dll", ".exe" } |
-            ForEach-Object {
-              if ($_.Name -notmatch '(?i)^(idevice|iproxy|inetcat|plistutil|usbmuxd)[.]exe$') {
-                Copy-Item $_.FullName publish\tools\ -Force
-              }
-            }
-
-      - name: Copy Sideloader executable from repository
-        shell: pwsh
-        run: |
-          $candidate = @(
-            "tools\sideloader.exe",
-            "tools\sideloader-cli-windows-x86_64.exe"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-          if (-not $candidate) {
-            $candidate = Get-ChildItem tools -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -match '(?i)^sideloader.*[.]exe$' } |
-              Select-Object -ExpandProperty FullName -First 1
-          }
-
-          if (-not $candidate) {
-            throw "Sideloader executable is missing. Put the Windows CLI executable in tools\sideloader.exe, commit it, then run this workflow again."
-          }
-
-          Copy-Item $candidate publish\tools\sideloader.exe -Force
-
-      - name: Verify bundled native dependencies
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          if (-not (Test-Path publish\tools\sideloader.exe)) {
-            throw "sideloader.exe was not bundled."
-          }
-
-          $plist = Get-ChildItem publish\tools -File |
-            Where-Object { $_.Name -match '(?i)(^plist[.]dll$|libplist.*[.]dll$)' } |
-            Select-Object -First 1
-
-          if (-not $plist) {
-            Write-Host "Files in tools:"
+          if (-not (Test-Path "publish\tools\plist.dll")) {
+            Write-Host "Files copied:"
             Get-ChildItem publish\tools | Select-Object Name,Length | Format-Table
-            throw "libplist runtime DLL was not found."
+            throw "plist.dll not found after extracting exact runtime package."
           }
 
-          Write-Host "Found plist runtime: $($plist.Name)"
-          Write-Host "=== FINAL TOOLS CONTENT ==="
+      - name: Copy Sideloader executable
+        shell: pwsh
+        run: |
+          if (Test-Path "tools\sideloader.exe") {
+            Copy-Item "tools\sideloader.exe" "publish\tools\sideloader.exe" -Force
+          } elseif (Test-Path "tools\sideloader-cli-windows-x86_64.exe") {
+            Copy-Item "tools\sideloader-cli-windows-x86_64.exe" "publish\tools\sideloader.exe" -Force
+          } else {
+            throw "Put Sideloader Windows executable at tools\sideloader.exe before running Actions."
+          }
+
+      - name: Final runtime verification
+        shell: pwsh
+        run: |
+          $required = @(
+            "publish\tools\sideloader.exe",
+            "publish\tools\plist.dll"
+          )
+          foreach ($f in $required) {
+            if (-not (Test-Path $f)) { throw "Missing required file: $f" }
+          }
+
+          Write-Host "=== FINAL tools folder ==="
           Get-ChildItem publish\tools -File |
             Sort-Object Name |
             Select-Object Name,Length |
             Format-Table -AutoSize
 
-      - name: Copy documentation
+      - name: Copy docs
         shell: pwsh
         run: |
           Copy-Item README.md publish\README.txt -Force
-          Copy-Item BACKEND-HUONG-DAN.md publish\BACKEND-HUONG-DAN.txt -Force
-          Copy-Item README-v4.txt publish\README-v4.txt -Force
+          Copy-Item README-v5.txt publish\README-v5.txt -Force
 
-      - name: Upload ready-to-run Windows package
+      - name: Upload ready-to-run package
         uses: actions/upload-artifact@v4
         with:
-          name: IPA-Signer-Pro-Windows-v4-Full
+          name: IPA-Signer-Pro-Windows-v5-Full
           path: publish/
           if-no-files-found: error
           retention-days: 30
