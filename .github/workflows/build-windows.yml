@@ -109,11 +109,7 @@ jobs:
           }
 
           if (-not $candidate) {
-            throw @"
-Sideloader executable is missing.
-Download the Windows CLI artifact from Dadoum/Sideloader Actions,
-put the EXE in tools\sideloader.exe, commit it, then run this workflow again.
-"@
+            throw "Sideloader executable is missing. Put the Windows CLI executable in tools\sideloader.exe, commit it, then run this workflow again."
           }
 
           Copy-Item $candidate publish\tools\sideloader.exe -Force
